@@ -1,0 +1,260 @@
+global raw "YourPathHere"
+global cleaned "YourPathHere"
+global temp "YourPathHere"
+
+
+*** Demographics
+use "$cleaned\Merged_dataset", clear
+
+cd "$temp"
+sumtable currentage any_obs, vartype(contmed) vartext("Age (years); median, IQR") dp2(0) first
+sumtable age_cat any_obs, vartype(categorical2) vartext("Age (years)") 
+sumtable female any_obs, vartype(categorical2) vartext("Sex") 
+sumtable ref_source any_obs, vartype(categorical2) vartext("Source of referral") 
+sumtable service_num any_obs, vartype(categorical2) vartext("Care pathway") 
+sumtable dis_reason any_obs, vartype(categorical2) vartext("Reason for discharge") 
+sumtable vw_los any_obs, vartype(contmed) vartext("VW length of stay") dp2(0) last exportname("Table 1 Demographics") 
+
+
+
+*** Clinical observations
+use "$cleaned\Merged_dataset", clear
+
+keep if any_obs==1
+
+keep patient_id referral_id temperature_first- resp_tot
+rename *_first *1
+rename *_min *2
+rename *_max *3
+
+reshape long temperature oxygensat sbp pulse resp, i(referral_id) j(timepoint)
+label define timepoint 1 "First" 2 "Min" 3 "Max"
+label values timepoint timepoint
+
+hist temperature
+hist oxygensat
+hist sbp
+hist pulse
+hist resp
+
+cd "$temp"
+sumtable resp timepoint, vartype(contmed) vartext("Respiratory rate (per minute)") dp1(0) dp2(0) first
+sumtable oxygensat timepoint, vartype(contmed) vartext("Oxygen saturation (%)") dp1(0) dp2(0)
+sumtable sbp timepoint, vartype(contmed) vartext("Systolic blood pressure (mmHg)")dp1(0) dp2(0)
+sumtable pulse timepoint, vartype(contmed) vartext("Heart rate (per minute)") dp1(0) dp2(0)  
+sumtable temperature timepoint, vartype(contmed) vartext("Temperature (C)") dp1(1) dp2(1)
+sumtable timepoint, vartype(headerrow) vartext("Ranges")
+sumtable resp timepoint, vartype(contrange) vartext("Respiratory rate (per minute)") dp1(0) dp2(0)
+sumtable oxygensat timepoint, vartype(contrange) vartext("Oxygen saturation (%)") dp1(0) dp2(0)
+sumtable sbp timepoint, vartype(contrange) vartext("Systolic blood pressure (mmHg)")dp1(0) dp2(0)
+sumtable pulse timepoint, vartype(contrange) vartext("Heart rate (per minute)") dp1(0) dp2(0)  
+sumtable temperature timepoint, vartype(contrange) vartext("Temperature (C)") dp1(1) dp2(1) last exportname("Table 2 Clinical observations") 
+
+
+
+*** NEWS values and component scores
+use "$cleaned\Merged_dataset", clear
+
+keep if any_obs==1
+
+keep patient_id referral_id news_derived_first_cat news_derived_max_cat news_derived_change_cat news_doccla_first_cat news_doccla_max_cat news_doccla_change_cat news_resp_first- news_temp_max
+
+count if news_derived_first_cat!=.
+count if news_derived_max_cat!=.
+count if news_derived_change_cat!=.
+
+count if news_doccla_first_cat!=.
+count if news_doccla_max_cat!=.
+count if news_doccla_change_cat!=.
+
+cd "$temp"
+gen temp=1
+* first
+sumtable temp, vartype(headerrow) vartext("First scores") first 
+sumtable news_derived_first_cat temp, vartype(categorical) vartext("Derived NEWS value") dp1(0) dp2(1) 
+sumtable news_doccla_first_cat temp, vartype(categorical) vartext("Doccla NEWS value") dp1(0) dp2(1) 
+sumtable news_resp_first temp, vartype(categorical) vartext("Respiratory rate (per minute)") dp1(0) dp2(1) 
+sumtable news_spo2_first temp, vartype(categorical) vartext("Oxygen saturation (%)") dp1(0) dp2(1)
+sumtable news_sbp_first temp, vartype(categorical) vartext("Systolic blood pressure (mmHg)")dp1(0) dp2(1)
+sumtable news_pulse_first temp, vartype(categorical) vartext("Heart rate (per minute)") dp1(0) dp2(1)  
+sumtable news_temp_first temp, vartype(categorical) vartext("Temperature (C)") dp1(0) dp2(1)
+sumtable news_oxygen_first temp, vartype(categorical) vartext("Oxygen requirement") dp1(0) dp2(1)
+sumtable news_alert_first temp, vartype(categorical) vartext("Level of consciousness") dp1(0) dp2(1) 
+* max 
+sumtable temp, vartype(headerrow) vartext("Max scores")  
+sumtable news_derived_max_cat temp, vartype(categorical) vartext("Derived NEWS value") dp1(0) dp2(1)  
+sumtable news_doccla_max_cat temp, vartype(categorical) vartext("Doccla NEWS value") dp1(0) dp2(1)  
+sumtable news_resp_max temp, vartype(categorical) vartext("Respiratory rate (per minute)") dp1(0) dp2(1) 
+sumtable news_spo2_max temp, vartype(categorical) vartext("Oxygen saturation (%)") dp1(0) dp2(1)
+sumtable news_sbp_max temp, vartype(categorical) vartext("Systolic blood pressure (mmHg)")dp1(0) dp2(1)
+sumtable news_pulse_max temp, vartype(categorical) vartext("Heart rate (per minute)") dp1(0) dp2(1)  
+sumtable news_temp_max temp, vartype(categorical) vartext("Temperature (C)") dp1(0) dp2(1)
+sumtable news_oxygen_max temp, vartype(categorical) vartext("Oxygen requirement") dp1(0) dp2(1)
+sumtable news_alert_max temp, vartype(categorical) vartext("Level of consciousness") dp1(0) dp2(1)
+* change 
+sumtable temp, vartype(headerrow) vartext("Change scores")  
+sumtable news_derived_change_cat temp, vartype(categorical) vartext("Derived NEWS value") dp1(0) dp2(1) 
+sumtable news_doccla_change_cat temp, vartype(categorical) vartext("Doccla NEWS value") dp1(0) dp2(1) last exportname("Table 3 NEWS values and component scores") 
+
+
+*** NEWS values by demographics
+use "$cleaned\Merged_dataset", clear
+
+keep if news_derived_first!=.
+
+keep patient_id referral_id age_cat female service_num news_derived_first news_derived_max news_derived_change news_doccla_first news_doccla_max news_doccla_change
+
+tab service_num
+
+cd "$temp"
+gen temp1=1 if news_derived_first!=.
+gen temp2=1 if news_doccla_first!=.
+
+** Derived NEWS
+* first
+sumtable temp1, vartype(headerrow) vartext("DERIVED NEWS") first 
+sumtable temp1, vartype(headerrow) vartext("First scores")  
+sumtable news_derived_first temp1, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By sex")  
+sumtable news_derived_first temp1, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_derived_first temp1, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By Age")  
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0) 
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0)  
+sumtable temp1, vartype(headerrow) vartext("By pathway")  
+sumtable news_derived_first temp1, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_derived_first temp1, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_derived_first temp1, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_derived_first temp1, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) 
+* max
+sumtable temp1, vartype(headerrow) vartext("Max scores")  
+sumtable news_derived_max temp1, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By sex")  
+sumtable news_derived_max temp1, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By Age")  
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0)  
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0)  
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By pathway")  
+sumtable news_derived_max temp1, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_derived_max temp1, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_derived_max temp1, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_derived_max temp1, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) 
+* change
+sumtable temp1, vartype(headerrow) vartext("Change scores")  
+sumtable news_derived_change temp1, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp1, vartype(headerrow) vartext("By sex")  
+sumtable news_derived_change temp1, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0)  
+sumtable temp1, vartype(headerrow) vartext("By Age")  
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0)  
+sumtable news_derived_change temp1, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0)  
+sumtable temp1, vartype(headerrow) vartext("By pathway")  
+sumtable news_derived_change temp1, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_derived_change temp1, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_derived_change temp1, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_derived_change temp1, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) 
+
+** Doccla NEWS 
+* first
+sumtable temp2, vartype(headerrow) vartext("DOCCLA NEWS") 
+sumtable temp2, vartype(headerrow) vartext("First scores") 
+sumtable news_doccla_first temp2, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By sex")  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_doccla_first temp2, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By Age")  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0) 
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0)  
+sumtable temp2, vartype(headerrow) vartext("By pathway")  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_doccla_first temp2, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_doccla_first temp2, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_doccla_first temp2, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) 
+* max
+sumtable temp2, vartype(headerrow) vartext("Max scores")  
+sumtable news_doccla_max temp2, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By sex")  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By Age")  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0)  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0)  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By pathway")  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_doccla_max temp2, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_doccla_max temp2, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) 
+* change
+sumtable temp2, vartype(headerrow) vartext("Change scores")  
+sumtable news_doccla_change temp2, vartype(contmed) vartext("Overall NEWS value") dp1(0) dp2(0) 
+sumtable temp2, vartype(headerrow) vartext("By sex")  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(female) condval(0) vartext("Male") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(female) condval(1) vartext("Female") dp1(0) dp2(0)  
+sumtable temp2, vartype(headerrow) vartext("By Age")  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(16) vartext("16-39 years") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(40) vartext("40-49 years") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(50) vartext("50-59 years") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(60) vartext("60-69 years") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(70) vartext("70-79 years") dp1(0) dp2(0)  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(age_cat) condval(80) vartext("80+ years") dp1(0) dp2(0)  
+sumtable temp2, vartype(headerrow) vartext("By pathway")  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(service_num) condval(1) vartext("Respiratory") dp1(0) dp2(0)  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(service_num) condval(2) vartext("Frailty") dp1(0) dp2(0)  
+sumtable news_doccla_change temp2, vartype(contmed) condvar(service_num) condval(3) vartext("OPAT") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(service_num) condval(4) vartext("Heart failure") dp1(0) dp2(0) 
+sumtable news_doccla_change temp2, vartype(contmed) condvar(service_num) condval(5) vartext("General") dp1(0) dp2(0) last exportname("Table 4 NEWS values by demographics") 
+
+
+
+*** Info for text
+use "$cleaned\Merged_dataset", clear
+
+tab any_obs
+
+tab news_derived_first_cat
+tab news_derived_max_cat
+tab news_derived_change_cat
+
+tab news_doccla_first_cat
+tab news_doccla_max_cat
+tab news_doccla_change_cat
+
+tab service_num if news_derived_first!=.
+
+tab news_pulse_first
+tab news_spo2_first
+tab news_spo2_max
+
+tab service_num dis_reason, row
+
+tab days_to_obs_min
+tab days_to_news_min
+ 
+tab dis_reason 
+tab dis_reason if news_derived_first_cat!=.
