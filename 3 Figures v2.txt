@@ -1,0 +1,329 @@
+global raw "YourPathHere"
+global cleaned "YourPathHere"
+global temp "YourPathHere"
+
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+gen temp1=1 if news_derived_first!=.
+gen temp2=1 if news_doccla_first!=.
+
+label define news_derived_change_cat 0 "No deterioration" 1 "Deteriorated 1-2" 2 "Deteriorated 3-4" 3 "Deteriorated 5-6" 4 "Deteriorated 7+", modify
+
+
+*** NEWS Scores
+
+* first full NEWS scores
+tab news_derived_first_cat
+graph bar (sum) temp1, over(news_derived_first_cat, label(labsize(*1))) ytitle("") ylabel(0(300)1200, angle(0) labsize(*1)) title("First NEWS2") /// 
+	text(679 9 "24%", size(*0.9)) text(1131 30 "42%", size(*0.9)) text(649 50.5 "23%", size(*0.9)) text(284 71 "8%", size(*0.9)) text(135 92 "2%", size(*0.9)) yscale(range(0 1000)) 
+	graph save "$temp\firstfullnews.gph", replace
+
+* maximum full NEWS scores
+tab news_derived_max_cat
+graph bar (sum) temp1, over(news_derived_max_cat, label(labsize(*1))) ytitle("") ylabel(0(300)1200, angle(0) labsize(*1)) title("Maximum NEWS2") /// 
+	text(195 9 "5%", size(*0.9)) text(765 30 "28%", size(*0.9)) text(967 50.5 "36%", size(*0.9)) text(647 71 "23%", size(*0.9)) text(304 92 "9%", size(*0.9)) yscale(range(0 1000)) 
+	graph save "$temp\maxfullnews.gph", replace
+
+* change in full NEWS scores
+tab news_derived_change_cat
+graph bar (sum) temp1, over(news_derived_change_cat, label(labsize(*1))) ytitle("") ylabel(0(300)1200, angle(0) labsize(*1)) title("Deterioration in NEWS2") /// 
+	text(776 9 "30%", size(*0.9)) text(1044 30 "41%", size(*0.9)) text(593 50.5 "22%", size(*0.9)) text(220 71 "6%", size(*0.9)) text(97 92 "1%", size(*0.9)) yscale(range(0 1000)) 
+	graph save "$temp\changefullnews.gph", replace
+ 
+cd "$temp"
+graph combine firstfullnews.gph maxfullnews.gph changefullnews.gph, row(3) l1("Number of admissions")
+
+		
+
+*** NEWS component parts
+gen id=_n
+
+rename news_resp_first q1
+rename news_spo2_first q2
+rename news_sbp_first q3
+rename news_pulse_first q4
+rename news_temp_first q5
+rename news_resp_max q8
+rename news_spo2_max q9
+rename news_sbp_max q10
+rename news_pulse_max q11
+rename news_temp_max q12
+
+keep id q1 q2 q3 q4 q5 q8 q9 q10 q11 q12
+reshape long q, i(id) j(question)
+
+
+drop id
+gen temp=1
+bysort question q: egen freq=total(temp) 
+duplicates drop
+drop temp
+drop if q==.
+
+label define question 1 "Respiratory rate" 2 "Oxygen sats" 3 "SBP" 4 "Pulse rate" 5 "Temperature" 8 "Respiratory rate" 9 "Oxygen sats" 10 "SBP" 11 "Pulse rate" 12 "Temperature"   
+label values question question
+
+tab question q  [fweight=freq]
+tab question q  [fweight=freq], row
+
+graph bar (sum) freq if question<=5, by(question, note("") title("First NEWS2 component scores") row(1)) over(q, label(labsize(*1.2))) nofill ///
+	ytitle("") ylabel(0(500)2500, angle(0) format(%10.0gc) labsize(*1.2)) yscale(range(0 2200))
+	graph save "$temp\firstcomps.gph", replace
+	
+graph bar (sum) freq if question>=8 & question<=12, by(question, note("") title("Maximum NEWS2 component scores") row(1)) over(q, label(labsize(*1.2))) nofill ///
+	ytitle("") ylabel(0(500)2500, angle(0) format(%10.0gc) labsize(*1.2)) yscale(range(0 2200))
+	graph save "$temp\maxcomps.gph", replace
+
+cd "$temp"
+graph combine firstcomps.gph maxcomps.gph, row(2) ycommon l1("Number of admissions")	
+
+
+		
+*** Sensitivty and specificity 
+
+program sens_spec
+gen temp1=1 if `1'==1 & `2'==1
+gen temp2=1 if `1'==0 & `2'==1
+gen temp3=1 if `1'==1 & `2'==0
+gen temp4=1 if `1'==0 & `2'==0
+egen temp5=total(temp1)
+egen temp6=total(temp2)
+egen temp7=total(temp3)
+egen temp8=total(temp4)
+gen sens_`3'=temp5/(temp5+temp6)
+gen spec_`3'=temp8/(temp8+temp7)
+gen ppv_`3'=temp5/(temp5+temp7)
+gen npv_`3'=temp8/(temp8+temp6)
+gen lrpos_`3'=sens_`3'/(1-spec_`3')
+gen lrneg_`3'=(1-sens_`3')/(spec_`3')
+gen sens_lci_`3'=sens_`3' - (1.96* sqrt((sens_`3'*(1-sens_`3'))/(temp5+temp6)))
+gen sens_uci_`3'=sens_`3' + (1.96* sqrt((sens_`3'*(1-sens_`3'))/(temp5+temp6)))
+gen spec_lci_`3'=spec_`3' - (1.96* sqrt((spec_`3'*(1-spec_`3'))/(temp7+temp8)))
+gen spec_uci_`3'=spec_`3' + (1.96* sqrt((spec_`3'*(1-spec_`3'))/(temp7+temp8)))
+gen ppv_lci_`3'=ppv_`3' - (1.96* sqrt((ppv_`3'*(1-ppv_`3'))/(temp5+temp7)))
+gen ppv_uci_`3'=ppv_`3' + (1.96* sqrt((ppv_`3'*(1-ppv_`3'))/(temp5+temp7)))
+gen npv_lci_`3'=npv_`3' - (1.96* sqrt((npv_`3'*(1-npv_`3'))/(temp6+temp8)))
+gen npv_uci_`3'=npv_`3' + (1.96* sqrt((npv_`3'*(1-npv_`3'))/(temp6+temp8)))
+rename temp5 trus_pos_`3'
+rename temp6 false_neg_`3'
+rename temp7 false_pos_`3'
+rename temp8 trus_neg_`3'
+drop temp1-temp4
+end
+
+** First NEWS - Hopsital admissions
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+roctab ever_hosp_byadmission news_derived_first_cat, detail graph
+
+foreach x in 0 1 2 3 4 {
+	gen newscat_`x'=1 if news_derived_first_cat>=`x' & news_derived_first_cat!=.
+	replace newscat_`x'=0 if news_derived_first_cat<`x'
+}
+gen newscat_5=0
+
+
+sens_spec newscat_0 ever_hosp_byadmission n0
+sens_spec newscat_1 ever_hosp_byadmission n1
+sens_spec newscat_2 ever_hosp_byadmission n2
+sens_spec newscat_3 ever_hosp_byadmission n3
+sens_spec newscat_4 ever_hosp_byadmission n4
+sens_spec newscat_5 ever_hosp_byadmission n5
+
+keep trus_pos_n0- npv_uci_n5
+duplicates drop
+gen temp=1
+reshape long trus_pos_n false_neg_n false_pos_n trus_neg_n sens_n spec_n ppv_n npv_n lrpos_n lrneg_n sens_lci_n sens_uci_n spec_lci_n spec_uci_n ppv_lci_n ppv_uci_n npv_lci_n npv_uci_n , i(temp) j(news_cutoff)
+drop temp
+rename *_n *
+
+order news_cutoff sens spec ppv npv lrpos lrneg
+
+gen news_str="NEWS2=1-2" if news_cutoff==1
+replace news_str="NEWS2=3-4" if news_cutoff==2
+replace news_str="NEWS2=5-6" if news_cutoff==3
+replace news_str="NEWS2=7+" if news_cutoff==4
+
+foreach x of varlist spec sens {
+gen  oneminus_`x'=1-`x'
+}
+
+twoway (scatter sens oneminus_spec, connect(l) col(navy) mlabel(news_str) mlabpos(11)) ///
+ (line sens sens, lpattern(dash) lcol(red)), ///
+ yscale(range(0 1)) ylabel(0 0.1 "0.1" 0.2 "0.2" 0.3 "0.3" 0.4 "0.4" 0.5 "0.5" 0.6 "0.6" 0.7 "0.7" 0.8 "0.8" 0.9 "0.9" 1, angle(0) labsize(*0.9)) ///
+ xscale(range(0 1)) xlabel(0 0.1 "0.1" 0.2 "0.2" 0.3 "0.3" 0.4 "0.4" 0.5 "0.5" 0.6 "0.6" 0.7 "0.7" 0.8 "0.8" 0.9 "0.9" 1, labsize(*0.9)) ///
+ ytitle("Sensitivity") xtitle("1-Specificity") legend(off) text(0.1 0.82 "AUC=0.55, 95% CI 0.51-0.60", size(*1.1) box fcol(white))
+ 
+ 
+** Max NEWS - Hopsital admissions
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+roctab ever_hosp_byadmission news_derived_max_cat, detail graph
+
+foreach x in 0 1 2 3 4 {
+	gen newscat_`x'=1 if news_derived_max_cat>=`x' & news_derived_max_cat!=.
+	replace newscat_`x'=0 if news_derived_max_cat<`x'
+}
+gen newscat_5=0
+
+
+sens_spec newscat_0 ever_hosp_byadmission n0
+sens_spec newscat_1 ever_hosp_byadmission n1
+sens_spec newscat_2 ever_hosp_byadmission n2
+sens_spec newscat_3 ever_hosp_byadmission n3
+sens_spec newscat_4 ever_hosp_byadmission n4
+sens_spec newscat_5 ever_hosp_byadmission n5
+
+keep trus_pos_n0- npv_uci_n5
+duplicates drop
+gen temp=1
+reshape long trus_pos_n false_neg_n false_pos_n trus_neg_n sens_n spec_n ppv_n npv_n lrpos_n lrneg_n sens_lci_n sens_uci_n spec_lci_n spec_uci_n ppv_lci_n ppv_uci_n npv_lci_n npv_uci_n , i(temp) j(news_cutoff)
+drop temp
+rename *_n *
+
+order news_cutoff sens spec ppv npv lrpos lrneg
+
+gen news_str="NEWS2=1-2" if news_cutoff==1
+replace news_str="NEWS2=3-4" if news_cutoff==2
+replace news_str="NEWS2=5-6" if news_cutoff==3
+replace news_str="NEWS2=7+" if news_cutoff==4
+
+foreach x of varlist spec sens {
+gen  oneminus_`x'=1-`x'
+}
+
+twoway (scatter sens oneminus_spec, connect(l) col(navy) mlabel(news_str) mlabpos(11)) ///
+ (line sens sens, lpattern(dash) lcol(red)), ///
+ yscale(range(0 1)) ylabel(0 0.1 "0.1" 0.2 "0.2" 0.3 "0.3" 0.4 "0.4" 0.5 "0.5" 0.6 "0.6" 0.7 "0.7" 0.8 "0.8" 0.9 "0.9" 1, angle(0) labsize(*0.9)) ///
+ xscale(range(0 1)) xlabel(0 0.1 "0.1" 0.2 "0.2" 0.3 "0.3" 0.4 "0.4" 0.5 "0.5" 0.6 "0.6" 0.7 "0.7" 0.8 "0.8" 0.9 "0.9" 1, labsize(*0.9)) ///
+ ytitle("Sensitivity") xtitle("1-Specificity") legend(off) text(0.1 0.82 "AUC=0.55, 95% CI 0.50-0.59", size(*1.1) box fcol(white))
+ 
+
+*** Mortality 
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+tab ever_died_byadmission news_derived_first_cat, col
+tab ever_died_byadmission news_derived_max_cat, col
+ 
+ 
+
+*** Sensitivity analysis 1 - excluding respiratory pathway:
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+drop if service_ever_resp==1
+
+** First NEWS
+tab ever_hosp_byadmission news_derived_first_cat, col
+roctab ever_hosp_byadmission news_derived_first_cat, detail graph
+
+** Max NEWS
+tab ever_hosp_byadmission news_derived_max_cat, col
+roctab ever_hosp_byadmission news_derived_max_cat, detail graph
+
+
+
+
+*** Sensitivity analysis 2 - Doccla recorded NEWS2:
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+** First NEWS
+tab ever_hosp_byadmission news_doccla_first_cat, col
+roctab ever_hosp_byadmission news_doccla_first_cat, detail graph
+
+** Max NEWS
+tab ever_hosp_byadmission news_doccla_max_cat, col
+roctab ever_hosp_byadmission news_doccla_max_cat, detail graph
+
+
+
+
+*** Supplemental Figures 
+use "$cleaned\Merged_dataset_alladmissions", clear
+
+keep if any_obs==1
+
+gen temp=1
+
+label define age_cat 16 "16-39 years" 40 "40-49 years" 50 "50-59 years" 60 "60-69 years" 70 "70-79 years" 80 "80+ years"
+label values age_cat age_cat
+
+** First NEWS
+graph bar (sum) temp, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) by(female, note("") title("    First NEW2")) ytitle("")  
+graph save "$temp\hist_sex_first.gph", replace
+graph bar (sum) temp, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+") label(labsize(*0.65))) by(age_cat, row(1) note("") title("    First NEW2")) ytitle("") ylabel(0 100 200 300 400)
+graph save "$temp\hist_age_first.gph", replace
+
+graph bar (sum) temp if service_ever_resp==1, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Respiratory", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_resp_first.gph", replace
+graph bar (sum) temp if service_ever_frail==1, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Frailty", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_frail_first.gph", replace
+graph bar (sum) temp if service_ever_opat==1, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("OPAT", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_opat_first.gph", replace
+graph bar (sum) temp if service_ever_hf==1, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Heart failure", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_hf_first.gph", replace
+graph bar (sum) temp if service_ever_general==1, over(news_derived_first_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("General", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_general_first.gph", replace
+
+cd "$temp"
+graph combine hist_resp_first.gph hist_frail_first.gph hist_opat_first.gph hist_hf_first.gph hist_general_first.gph, row(1) ycommon title("    First NEWS2") commonscheme
+graph save "$temp\hist_pathway_first.gph", replace
+
+
+** Max NEWS
+graph bar (sum) temp, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) by(female, note("") title("   Maximum NEW2")) ytitle("") ylabel(0 200 400 600) 
+graph save "$temp\hist_sex_max.gph", replace
+graph bar (sum) temp, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" ) label(labsize(*0.65))) by(age_cat, row(1) note("") title("  Maximum NEW2")) ytitle("") ylabel(0 100 200 300 400)
+graph save "$temp\hist_age_max.gph", replace
+
+graph bar (sum) temp if service_ever_resp==1, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Respiratory", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_resp_max.gph", replace
+graph bar (sum) temp if service_ever_frail==1, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Frailty", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_frail_max.gph", replace
+graph bar (sum) temp if service_ever_opat==1, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("OPAT", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_opat_max.gph", replace
+graph bar (sum) temp if service_ever_hf==1, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Heart failure", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_hf_max.gph", replace
+graph bar (sum) temp if service_ever_general==1, over(news_derived_max_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("General", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_general_max.gph", replace
+
+cd "$temp"
+graph combine hist_resp_max.gph hist_frail_max.gph hist_opat_max.gph hist_hf_max.gph hist_general_max.gph, row(1) ycommon title("  Maximum NEWS2")
+graph save "$temp\hist_pathway_max.gph", replace
+
+** Change in NEWS
+graph bar (sum) temp, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) by(female, note("") title("   Deterioration in NEW2")) ytitle("")  
+graph save "$temp\hist_sex_change.gph", replace
+graph bar (sum) temp, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" ) label(labsize(*0.65))) by(age_cat, row(1) note("") title("Deterioration in NEW2")) ytitle("") ylabel(0 100 200 300 400)
+graph save "$temp\hist_age_change.gph", replace
+
+graph bar (sum) temp if service_ever_resp==1, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Respiratory", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_resp_change.gph", replace
+graph bar (sum) temp if service_ever_frail==1, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Frailty", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_frail_change.gph", replace
+graph bar (sum) temp if service_ever_opat==1, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("OPAT", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_opat_change.gph", replace
+graph bar (sum) temp if service_ever_hf==1, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("Heart failure", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_hf_change.gph", replace
+graph bar (sum) temp if service_ever_general==1, over(news_derived_change_cat,  relabel(1 "0" 2 "1-2" 3 "3-4" 4 "5-6" 5 "7+" )) title("General", box bcolor(gs14)) ytitle("")
+graph save "$temp\hist_general_change.gph", replace
+
+cd "$temp"
+graph combine hist_resp_change.gph hist_frail_change.gph hist_opat_change.gph hist_hf_change.gph hist_general_change.gph, row(1) ycommon title("Deterioration in NEWS2")
+graph save "$temp\hist_pathway_change.gph", replace
+
+ 
+graph combine hist_sex_first.gph hist_sex_max.gph hist_sex_change.gph, row(3) ycommon l1("Number of admissions")
+graph combine hist_age_first.gph hist_age_max.gph hist_age_change.gph, row(3) ycommon l1("Number of admissions")
+graph combine hist_pathway_first.gph hist_pathway_max.gph hist_pathway_change.gph, row(3) ycommon l1("Number of admissions")
+

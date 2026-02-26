@@ -1,0 +1,421 @@
+global raw "YourPathHere"
+global cleaned "YourPathHere"
+
+
+*** Demographics
+import delimited "$raw\Sirona_data_demographics_2025.csv", clear 
+drop if referral_id=="" & patient_id==.
+
+tab1 currentage gender ethnicityactual sirona_currentservice sirona_emis_dischargeorrejection, m
+
+* putting dates into Stata date format
+gen ref_date=date(referralrequestreceiveddate,"DMY")
+gen treatstart_date=date(referraltotreatmentperiodstartda,"DMY")
+gen treatend_date=date(referraltotreatmentperiodenddate,"DMY")
+gen dis_date=date(servicedischargedate,"DMY")
+format ref_date dis_date treatstart_date treatend_date %dDD/NN/CCYY
+
+gen ref_month=month(ref_date)
+gen ref_year=year(ref_date)
+gen ref_monthyear=(ref_year-2023)*12 + ref_month
+label define ref_monthyear 1 "Jan 23" 2 "Feb 23" 3 "Mar 23" 4 "Apr 23" 5 "May 23" 6 "Jun 23" 7 "Jul 23" 8 "Aug 23" 9 "Sep 23" 10 "Oct 23" 11 "Nov 23" 12 "Dec 23" 13 "Jan 24" 14 "Feb 24" 15 "Mar 24" 16 "Apr 24" 17 "May 24" 18 "Jun 24" 19 "Jul 24" 20 "Aug 24" 21 "Sep 24" 22 "Oct 24" 23 "Nov 24" 24 "Dec 24" 25 "Jan 25" 26 "Feb 25"
+label values ref_monthyear ref_monthyear
+tab ref_monthyear
+order ref_monthyear, after(referral_id)
+
+* dropping variables we don't need
+drop referralrequestreceiveddate referraltotreatmentperiodstartda referraltotreatmentperiodenddate servicedischargedate sirona_first_f2f_carecontactdate sirona_first_video_f2f_careconta sirona_first_non_f2f_carecontact rttstart_datetime rttstop_datetime referraltotreatmentperiodendtime sirona_specialty ethnicity sirona_referringorganisationname
+
+* dropping first 9 months of data following reviewer comments (first 9 months has few respiratory measurements)
+drop if ref_monthyear<=9
+
+* generating categorical age variable
+egen age_cat=cut(currentage), at(16,40,50,60,70,80,120)
+tab age_cat
+order age_cat, after(currentage)
+
+* generating numerical sex variable
+gen female=1 if gender=="Female"
+replace female=0 if gender=="Male"
+label define female 0 "Male" 1 "Female"
+label values female female
+order female, after(gender)
+drop gender
+
+* generating services variable
+tab sirona_currentservice
+replace sirona_currentservice=subinstr(sirona_currentservice,"NHS@H - ","",.) 
+rename sirona_currentservice service
+tab service 
+gen service_num=1 if service=="Respiratory"
+replace service_num=2 if inlist(service,"Frailty","Z - DO NOT USE - GEMS")
+replace service_num=3 if service=="OPAT"
+replace service_num=4 if service=="Heart Failure"
+replace service_num=5 if inlist(service, "General", "Hospital", "NHS@Home")
+label define service_num 1 "Respiratory" 2 "Frailty" 3 "OPAT" 4 "Heart failure" 5 "General"
+label values service_num service_num
+order service_num, after(service)
+
+**** Dropping patients in services that are not relevant 
+** Physio, OT, nebuliser and social prescribing are all secondary services within the other virtual ward services. Accompanied by another virtual ward around 99% of the time.
+tab service if service_num==.
+drop if inlist(service,"NHS@Home - Nebuliser Service","OT","Physio","Social Prescribing","Z - DO NOT USE - Navigator")
+
+
+* generating numeric discharge reason variable
+tab sirona_emis_dischargeorrejection
+gen dis_reason=1 if strpos(sirona_emis_dischargeorrejection,"Activity Completed")
+replace dis_reason=2 if strpos(sirona_emis_dischargeorrejection,"Hospital - Admission/Readmission")
+replace dis_reason=3 if inlist(sirona_emis_dischargeorrejection,"Nursing Home - Discharged","Residential Home - Discharged")
+replace dis_reason=4 if strpos(sirona_emis_dischargeorrejection,"Referred to") | inlist(sirona_emis_dischargeorrejection,"D2A Pathway 1 - Discharged","Home: New Package of Care - Discharged","Managed Referral to Another EMIS Instance - Discharged","SASS  Multiple Referral Process - Discharged")
+replace dis_reason=5 if sirona_emis_dischargeorrejection=="Service User Died - Discharged"
+label define dis_reason 1 "Care complete" 2 "Admitted to hospital" 3 "Admitted to residential/nursing home" 4 "Referred to other service" 5 "Died" 
+label values dis_reason dis_reason
+tab sirona_emis_dischargeorrejection if dis_reason==.
+order dis_reason, after(sirona_emis_dischargeorrejection)
+
+* dropping patients who never used the service
+* dropping patients who are still within the service at point of data extraction/discharge
+tab sirona_emis_dischargeorrejection if dis_reason==.
+tab sirona_emis_dischargeorrejection if dis_date==.
+drop if strpos(sirona_emis_dischargeorrejection,"Did Not Attend") | strpos(sirona_emis_dischargeorrejection,"Service User Self Discharge/Declined")
+drop if dis_date==. | inlist(sirona_emis_dischargeorrejection,"Caseload","Treatment Booked") | sirona_emis_dischargeorrejection=="Moved Out of the Area - Discharged"
+
+* generating variable for step-up vs. step down care
+tab sourceofreferralforcommunity
+gen ref_type=1 if inlist(sourceofreferralforcommunity,1,5,7,8,9,11,12,21,22)
+replace ref_type=2 if sourceofreferralforcommunity==6
+label define ref_type 1 "Step up" 2 "Step down"
+label values ref_type ref_type
+order ref_type, after(sirona_sourceofreferralforcommun)
+
+* renaming 
+rename ethnicityactual ethnicity
+rename sourceofreferralforcommunity ref_source_num
+rename sirona_sourceofreferralforcommun ref_source
+rename sirona_emis_dischargeorrejection dis_reason_det
+
+* generating a variable to group together admission periods 
+sort patient_id ref_date referral_id 
+gen ref_diff=ref_date-dis_date[_n-1] if patient_id==patient_id[_n-1]
+gen dis_diff=dis_date-dis_date[_n-1] if patient_id==patient_id[_n-1]
+gen admission_id=1 if patient_id!=patient_id[_n-1] | ref_diff>0
+replace admission_id=0 if admission_id==.
+replace admission_id=admission_id+admission_id[_n-1] if _n>1
+order admission_id, after(referral_id) 
+
+** generating indicator for first admission
+sort patient_id ref_date admission_id referral_id
+gen first_admit_peradmission=1 if admission_id!=admission_id[_n-1]
+
+* generating variable for number of admissions 
+bys patient_id: egen temp10=min(admission_id)
+bys patient_id: egen temp20=max(admission_id)
+gen separate_admit_count=temp20-temp10+1
+recode separate_admit_count (1=1) (2=2) (3=3) (4 5 6 7 8 9 10 11 12 13 = 4), gen(separate_admit_count_cat)
+label define separate_admit_count_cat 1 "1" 2 "2" 3 "3" 4 "4+"
+label values separate_admit_count_cat separate_admit_count_cat
+drop temp10 temp20
+
+** generating indicators for each service
+forvalues x=1/5 {
+	gen temp=1 if service_num==`x'
+	bys admission_id: egen temp_`x'=max(temp)
+	replace temp_`x'=0 if temp_`x'==.
+	drop temp
+}
+rename temp_1 service_ever_resp
+rename temp_2 service_ever_frail
+rename temp_3 service_ever_opat
+rename temp_4 service_ever_hf
+rename temp_5 service_ever_general
+
+** calculating episode length of stay
+gen los_row=dis_date-ref_date
+
+** calculating total los
+gen temp2=ref_diff
+replace temp2=0 if temp2>0
+gen temp3=los_row + temp2
+replace temp3=0 if ref_diff<0 & dis_diff<=0
+bys patient_id: egen los_total=total(temp3)
+bys admission_id: egen los_episode=total(temp3)
+drop ref_diff dis_diff temp2 temp3
+
+** indicator for ever admitted to hospital
+gen temp=1 if dis_reason==2
+bys patient_id: egen ever_hosp=max(temp)
+replace ever_hosp=0 if ever_hosp==.
+bys admission_id: egen ever_hosp_byadmission=max(temp)
+replace ever_hosp_byadmission=0 if ever_hosp_byadmission==.
+drop temp
+
+** indicator for ever died
+gen temp=1 if dis_reason==5
+bys patient_id: egen ever_died=max(temp)
+replace ever_died=0 if ever_died==.
+bys admission_id: egen ever_died_byadmission=max(temp)
+replace ever_died_byadmission=0 if ever_died_byadmission==.
+drop temp
+
+** generating care "outcome" variable
+gen outcome=1 if ever_hosp_byadmission==0 & ever_died_byadmission==0
+replace outcome=2 if ever_hosp_byadmission==1 & ever_died_byadmission==0
+replace outcome=3 if ever_hosp_byadmission==0 & ever_died_byadmission==1
+label define outcome 1 "VW care complete" 2 "Hopsital admission" 3 "VW death"
+label values outcome outcome
+
+save "$cleaned\Demographics_alladmissions", replace
+
+
+
+
+
+*** Doccla data
+import delimited "$raw\Sirona_data_doccla_2025.csv", clear 
+drop if referral_id=="" & patient_id==.
+gen rownum=_n
+
+* excluding data for patients who have been excluded above and merging in admission ID
+cfvars "$cleaned\Demographics_alladmissions"
+merge m:1 patient_id referral_id using "$cleaned\Demographics_alladmissions"
+keep if _merge==3
+order admission_id, after(referral_id) 
+drop ref_monthyear-_merge 
+
+* splitting out date and time
+gen obs_date=date(record_date,"DMY")
+format obs_date %dDD/NN/CCYY
+rename record_time obs_time
+
+split obs_time, p(":")
+destring obs_time1 obs_time2 obs_time3, replace
+gen obs_time_num=(obs_time1*60) + obs_time2 + (obs_time3/60)
+
+order obs_date obs_time obs_time_num, before(record_date)
+drop record_date obs_time1 obs_time2 obs_time3
+
+gen ref_date=date(referralrequestreceiveddate,"DMY")
+gen dis_date=date(servicedischargedate,"DMY")
+format ref_date dis_date %dDD/NN/CCYY
+order ref_date dis_date, after(servicedischargedate)
+
+* only keeping variables we need
+keep patient_id referral_id admission_id ref_date dis_date obs_date obs_time obs_time_num temperaturedegreesc oxygensaturation systolicbloodpressuremmhg pulseratebeatsmin news220 respirationrateminute rownum
+
+* renaming
+rename temperaturedegreesc temperature
+rename oxygensaturation oxygensat 
+rename systolicbloodpressuremmhg sbp 
+rename pulseratebeatsmin pulse 
+rename respirationrateminute resp 
+
+* dropping rows with no obs 
+drop if temperature==. & oxygensat==. & sbp==. & pulse==. & news220==. & resp==.
+
+
+* checking observations are within the correct timeframe 
+drop if obs_date<ref_date | obs_date>dis_date
+
+
+** NEWS component parts
+
+*Respiratory rate
+tab resp
+replace resp=. if resp<3 | resp>60 /* 264/29,880 measurements (0.98%) */
+gen news_resp=0 if resp>=12 & resp<21
+replace news_resp=1 if resp>=9 & resp<12
+replace news_resp=2 if resp>=21 & resp<25
+replace news_resp=3 if (resp>0 & resp<9) | (resp>=25 & resp!=.)
+tab news_resp, m
+
+* Oxygen sats
+tab oxygensat
+replace oxygensat=. if oxygensat<50 | oxygensat>100 
+gen news_spo2=0 if oxygensat>=96 & oxygensat<=100
+replace news_spo2=1 if oxygensat>=94 & oxygensat<96
+replace news_spo2=2 if oxygensat>=92 & oxygensat<94
+replace news_spo2=3 if oxygensat>0 & oxygensat<92 
+
+* Systolic blood pressure
+tab sbp
+gen news_sbp=0 if sbp>=111 & sbp<220
+replace news_sbp=1 if sbp>=101 & sbp<111
+replace news_sbp=2 if sbp>=91 & sbp<101
+replace news_sbp=3 if (sbp>0 & sbp<91) | (sbp>=220 & sbp!=.)
+tab news_sbp, m
+
+* Heart rate
+tab pulse
+replace pulse=. if pulse==0 
+gen news_pulse=0 if pulse>=51 & pulse<91
+replace news_pulse=1 if (pulse>=41 & pulse<51) | (pulse>=91 & pulse<111)
+replace news_pulse=2 if (pulse>=111 & pulse<131)
+replace news_pulse=3 if (pulse>0 & pulse<41) | (pulse>=131 & pulse<250)
+tab news_pulse, m
+
+* Temperature
+tab temperature
+replace temperature=. if temperature<30 | temperature>41 
+gen news_temp=0 if temperature>=36.1 & temperature<38.1
+replace news_temp=1 if (temperature>=35.1 & temperature<36.1) | (temperature>=38.1 & temperature<39.1)
+replace news_temp=2 if (temperature>=39.1 & temperature<50)
+replace news_temp=3 if (temperature>0 & temperature<35.1) 
+tab news_temp, m
+
+
+* deriving calculated NEWS score
+gen news_derived=news_resp + news_spo2 + news_sbp + news_pulse + news_temp 
+
+* deriving categories of NEWS
+recode news_derived (0 = 0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_derived_cat)
+label define news_derived_cat 0 "NEWS2=0" 1 "NEWS2=1-2" 2 "NEWS2=3-4" 3 "NEWS2=5-6" 4 "NEWS2=7+"
+label values news_derived_cat news_derived_cat
+
+
+* deriving first NEWS value
+gen temp=1 if news_derived!=.
+sort patient_id admission_id temp obs_date obs_time_num rownum 
+gen news_derived_first=news_derived if temp==1 & admission_id!=admission_id[_n-1]
+replace news_derived_first=news_derived_first[_n-1] if news_derived_first==. & admission_id==admission_id[_n-1]
+tab news_derived_first if admission_id!=admission_id[_n-1]
+drop temp 
+recode news_derived_first (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_derived_first_cat)
+label values news_derived_first_cat news_derived_cat
+
+
+* generating maximum new score across all observations
+tab news_derived
+bysort admission_id: egen news_derived_max=max(news_derived)
+tab news_derived_max if admission_id!=admission_id[_n-1]
+
+recode news_derived_max (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_derived_max_cat)
+label values news_derived_max_cat news_derived_cat
+
+* generating number of NEWS observations
+gen temp1000=1 if news_derived!=.
+bys admission_id: egen no_of_der_news=total(temp1000)
+drop temp1000 
+
+
+* generating change from first to max NEWS variable
+gen news_derived_change=news_derived_max-news_derived_first
+tab news_derived_change if no_of_der_news<=1
+replace news_derived_change=. if no_of_der_news<=1
+
+tab news_derived_change
+recode news_derived_change (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_derived_change_cat)
+label define news_derived_change_cat 0 "NEWS2 did not deteriorate" 1 "NEWS2 deteriorated by 1-2" 2 "NEWS2 deteriorated by 3-4"  3 "NEWS2 deteriorated by 5-6"  4 "NEWS2 deteriorated by 7+" 
+label values news_derived_change_cat news_derived_change_cat
+
+
+*** Doccla NEWS2
+tab news220
+replace news220=. if news220>20
+
+* deriving first Doccla NEWS value
+gen temp=1 if news220!=.
+sort patient_id admission_id temp obs_date obs_time_num rownum 
+gen news_doccla_first=news220 if temp==1 & admission_id!=admission_id[_n-1]
+replace news_doccla_first=news_doccla_first[_n-1] if news_doccla_first==. & admission_id==admission_id[_n-1]
+tab news_doccla_first if admission_id!=admission_id[_n-1]
+drop temp 
+recode news_doccla_first (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_doccla_first_cat)
+label values news_doccla_first_cat news_derived_cat
+
+
+* generating maximum new score across all observations
+tab news220
+bysort admission_id: egen news_doccla_max=max(news220)
+tab news_doccla_max if admission_id!=admission_id[_n-1]
+
+recode news_doccla_max (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_doccla_max_cat)
+label values news_doccla_max_cat news_derived_cat
+
+* generating number of NEWS observations
+gen temp1000=1 if news220!=.
+bys admission_id: egen no_of_doccla_news=total(temp1000)
+drop temp1000 
+
+
+* generating change from first to max NEWS variable
+gen news_doccla_change=news_doccla_max-news_doccla_first
+tab news_doccla_change if no_of_doccla_news<=1
+replace news_doccla_change=. if no_of_doccla_news<=1
+
+tab news_doccla_change
+recode news_doccla_change (0 =0) (1 2 =1) (3 4 = 2) (5 6 =3) (7/20 =4), gen(news_doccla_change_cat)
+label values news_doccla_change_cat news_derived_change_cat
+
+
+** First and max of each news component part for each patient 
+foreach x in news_resp news_spo2 news_sbp news_pulse news_temp {
+	gen temp=1 if `x'!=.
+	sort patient_id admission_id temp obs_date obs_time_num rownum
+	gen `x'_first=`x' if admission_id!=admission_id[_n-1]
+	replace `x'_first=`x'_first[_n-1] if `x'_first==. & admission_id==admission_id[_n-1]
+	bys admission_id: egen `x'_max=max(`x')
+	drop temp
+}
+
+** min and max of each observation for each patient 
+foreach x in temperature oxygensat sbp pulse resp {
+	gen temp=1 if `x'!=.
+	sort patient_id admission_id temp obs_date obs_time_num rownum
+	gen `x'_first=`x' if admission_id!=admission_id[_n-1]
+	replace `x'_first=`x'_first[_n-1] if `x'_first==. & admission_id==admission_id[_n-1]
+	bys admission_id: egen `x'_min=min(`x')
+	bys admission_id: egen `x'_max=max(`x')
+	bys admission_id: egen `x'_tot=total(temp)	
+	drop temp
+}
+
+* generating days from referal to obs 
+gen days_to_obs=obs_date-ref_date
+bys admission_id: egen days_to_obs_min=min(days_to_obs)
+gen days_to_news=obs_date-ref_date if news_derived!=.
+bys admission_id: egen days_to_news_min=min(days_to_news)
+gen days_to_news_doccla=obs_date-ref_date if news220!=.
+bys admission_id: egen days_to_news_doccla_min=min(days_to_news_doccla)
+
+bys admission_id: egen obs_date_min=min(obs_date)
+
+* checking proportion of derived and caluclated NEWS2 that match
+count if news_derived!=. & news220!=. /*7091*/
+count if news_derived==news220 & news220!=. /*5763- 81%*/
+
+
+keep patient_id referral_id admission_id news_derived_first news_derived_first_cat news_derived_max news_derived_max_cat no_of_der_news news_derived_change news_derived_change_cat news_doccla_first news_doccla_first_cat news_doccla_max news_doccla_max_cat no_of_doccla_news news_doccla_change news_doccla_change_cat news_resp_first- news_temp_max temperature_first- resp_tot days_to_obs_min days_to_news_min days_to_news_doccla_min obs_date_min
+duplicates drop 
+
+save "$cleaned\Obs_alladmissions", replace
+
+
+
+
+
+*** Merging together 
+use "$cleaned\Demographics_alladmissions", clear
+cfvars "$cleaned\Obs_alladmissions"
+merge 1:1 patient_id referral_id admission_id using "$cleaned\Obs_alladmissions"
+gen any_obs=1 if _merge==3
+replace any_obs=0 if _merge==1
+drop if _merge==2
+drop _merge 
+
+gen any_news_derived=1 if news_derived_first!=.
+replace any_news_derived=0 if any_news_derived==.
+gen any_news_doccla=1 if news_doccla_first!=.
+replace any_news_doccla=0 if any_news_doccla==.
+
+sort patient_id admission_id
+
+* only keeping one row for each admission (i.e. dropping those where admissions overlap)
+keep if first_admit_peradmission==1
+drop service service_num dis_reason_det dis_reason ref_date- first_admit_peradmission los_row los_total
+
+save "$cleaned\Merged_dataset_alladmissions", replace
+
+ 
+
+
